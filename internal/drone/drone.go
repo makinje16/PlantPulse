@@ -112,6 +112,18 @@ func (d *Drone) ArmAndTakeOff(lat, long float32) error {
 }
 
 func (d *Drone) ArmAndTakeOffFromHome(ctx context.Context, altitude float32) error {
+	armCmd := &common.MessageCommandLong{
+		TargetSystem:    1, // target system ID (usually 1 for a single drone setup)
+		TargetComponent: 1, // target component ID
+		Command:         common.MAV_CMD_COMPONENT_ARM_DISARM,
+		Confirmation:    0,
+		Param1:          1, // 1 to arm, 0 to disarm
+	}
+
+	if err := d.sendCommand(armCmd); err != nil {
+		return err
+	}
+
 	msg := &common.MessageCommandLong{
 		TargetSystem:    1,
 		TargetComponent: 1,
