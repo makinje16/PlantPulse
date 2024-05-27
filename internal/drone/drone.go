@@ -72,11 +72,42 @@ func (d *Drone) sendCommand(cmd message.Message) error {
 }
 
 func (d *Drone) ChangeMode(mode FlightMode) error {
-	return errors.ErrUnsupported
+	msg := &common.MessageCommandLong{
+		TargetSystem:    1,
+		TargetComponent: 1,
+		Command:         common.MAV_CMD_DO_SET_MODE,
+		Confirmation:    0,
+		Param1:          mode.float32(),
+	}
+
+	return d.sendCommand(msg)
 }
 
-func (d *Drone) ArmAndTakeOff() error {
-	return errors.ErrUnsupported
+func (d *Drone) ArmAndTakeOff(lat, long float32) error {
+	msg := &common.MessageCommandLong{
+		TargetSystem:    1, // target system ID (usually 1 for a single drone setup)
+		TargetComponent: 1, // target component ID
+		Command:         common.MAV_CMD_COMPONENT_ARM_DISARM,
+		Confirmation:    0,
+		Param1:          1, // 1 to arm, 0 to disarm
+	}
+
+	if err := d.sendCommand(msg); err != nil {
+		return err
+	}
+
+	// Takeoff
+	cmdTakeoff := &common.MessageCommandLong{
+		TargetSystem:    1,
+		TargetComponent: 1,
+		Command:         common.MAV_CMD_NAV_TAKEOFF,
+		Confirmation:    0,
+		Param5:          -35.3612,
+		Param6:          149.1654,
+		Param7:          10,
+	}
+
+	return d.sendCommand(cmdTakeoff)
 }
 
 func (d *Drone) StartMission(mission *Mission) error {
@@ -112,11 +143,8 @@ func (d *Drone) handleFrame(evt *gomavlib.EventFrame) {
 		d.currentPitch = msg.Pitch
 		d.currentRoll = msg.Roll
 		d.currentYaw = msg.Yaw
-	case *common.MessagePositionTargetGlobalInt:
-		x
-		y
-		z
-		d.homePoint.updateWayPoint()
+	case *common.MessagePositionTargetLocalNed:
+		d.currentPosition.updateWayPoint(msg.X, msg.Y, msg.Z)
 	default:
 		break
 	}

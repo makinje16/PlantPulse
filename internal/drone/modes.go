@@ -3,19 +3,23 @@ package internal
 type FlightMode uint8
 
 const (
-	STABILIZE = 1
-	ACRO      = 2
-	ALT_HOLD  = 3
-	AUTO      = 4
-	GUIDED    = 5
-	LOITER    = 6
-	RTL       = 7
-	CIRCLE    = 8
-	LAND      = 9
-	DRIFT     = 10
-	SPORT     = 11
-	FLIP      = 12
-	AUTOTUNE  = 13
-	POSHOLD   = 14
-	BRAKE     = 15
+	STABILIZE = 0
+	ACRO      = 1
+	ALT_HOLD  = 2
+	AUTO      = 3
+	GUIDED    = 4
+	LOITER    = 5
+	RTL       = 6
+	CIRCLE    = 7
+	LAND      = 8
+	DRIFT     = 9
+	SPORT     = 10
+	FLIP      = 11
+	AUTOTUNE  = 12
+	POSHOLD   = 13
+	BRAKE     = 14
 )
+
+func (mode FlightMode) float32() float32 {
+	return float32(mode)
+}
