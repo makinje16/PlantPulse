@@ -77,7 +77,8 @@ func (d *Drone) ChangeMode(mode FlightMode) error {
 		TargetComponent: 1,
 		Command:         common.MAV_CMD_DO_SET_MODE,
 		Confirmation:    0,
-		Param1:          mode.float32(),
+		Param1:          float32(common.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED),
+		Param2:          mode.float32(),
 	}
 
 	return d.sendCommand(msg)
@@ -110,16 +111,64 @@ func (d *Drone) ArmAndTakeOff(lat, long float32) error {
 	return d.sendCommand(cmdTakeoff)
 }
 
+func (d *Drone) ArmAndTakeOffFromHome(ctx context.Context, altitude float32) error {
+	msg := &common.MessageCommandLong{
+		TargetSystem:    1,
+		TargetComponent: 1,
+		Command:         common.MAV_CMD_NAV_TAKEOFF,
+		Param5:          d.homePoint.Latitude(),
+		Param6:          d.homePoint.Longitude(),
+		Param7:          altitude,
+	}
+
+	if err := d.sendCommand(msg); err != nil {
+		return err
+	}
+
+	return d.waitForHeight(ctx, altitude)
+}
+
+func (d *Drone) Land(ctx context.Context) error {
+	cmdLand := &common.MessageCommandLong{
+		TargetSystem:    1,
+		TargetComponent: 1,
+		Command:         common.MAV_CMD_NAV_LAND,
+		Confirmation:    0,
+		Param2:          float32(common.PRECISION_LAND_MODE_DISABLED),
+	}
+
+	if err := d.sendCommand(cmdLand); err != nil {
+		return err
+	}
+
+	return d.waitForHeight(ctx, 0)
+}
+
+func (d *Drone) waitForHeight(ctx context.Context, desiredAlt float32) error {
+	altitudeSubscription, unsubscribe := d.currentPosition.subscribeAlt()
+	defer unsubscribe()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return errors.New("Exceeded wait time to reach altitude")
+		case alt := <-altitudeSubscription:
+			if math.Abs(float64(alt-desiredAlt)) < .3 {
+				return nil
+			}
+		default:
+			continue
+		}
+	}
+
+}
+
 func (d *Drone) StartMission(mission *Mission) error {
 	return errors.ErrUnsupported
 }
 
 func (d *Drone) ReturnHome() error {
-	return d.Move(
-		d.homePoint.X(),
-		d.homePoint.Y(),
-		d.homePoint.Z(),
-	)
+	return errors.ErrUnsupported
 }
 
 func (d *Drone) Move(forward, right, down float32) error {
@@ -143,8 +192,12 @@ func (d *Drone) handleFrame(evt *gomavlib.EventFrame) {
 		d.currentPitch = msg.Pitch
 		d.currentRoll = msg.Roll
 		d.currentYaw = msg.Yaw
-	case *common.MessagePositionTargetLocalNed:
-		d.currentPosition.updateWayPoint(msg.X, msg.Y, msg.Z)
+	case *common.MessagePositionTargetGlobalInt:
+		d.currentPosition.updateWayPoint(
+			float32(msg.LatInt)/SCALE_FACTOR,
+			float32(msg.LonInt)/SCALE_FACTOR,
+			msg.Alt,
+		)
 	default:
 		break
 	}
