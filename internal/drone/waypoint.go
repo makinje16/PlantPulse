@@ -1,6 +1,8 @@
 package internal
 
-import "sync"
+import (
+	"sync"
+)
 
 const SCALE_FACTOR = 1e7
 
@@ -24,9 +26,9 @@ func NewWayPoint(lat, long, alt float32) *WayPoint {
 		lat:         lat,
 		long:        long,
 		alt:         alt,
-		mapChanLat:  make(map[uint64]chan float32),
-		mapChanLong: make(map[uint64]chan float32),
-		mapChanAlt:  make(map[uint64]chan float32),
+		mapChanLat:  make(map[uint64]chan float32, 10),
+		mapChanLong: make(map[uint64]chan float32, 10),
+		mapChanAlt:  make(map[uint64]chan float32, 10),
 	}
 }
 

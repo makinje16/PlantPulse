@@ -17,12 +17,17 @@ type Drone struct {
 	currentPitch    float32
 	currentYaw      float32
 	currentRoll     float32
-	homePoint       WayPoint
-	currentPosition WayPoint
+	homePoint       *WayPoint
+	currentPosition *WayPoint
+	ackChan         chan *common.MessageCommandAck
 }
 
 func NewDrone(node *gomavlib.Node, ctx context.Context) *Drone {
-	drone := &Drone{node: node}
+	drone := &Drone{
+		node:    node,
+		ackChan: make(chan *common.MessageCommandAck),
+	}
+
 	go drone.monitorEventLog(ctx)
 
 	return drone
@@ -33,16 +38,9 @@ func (d *Drone) sendCommand(cmd message.Message) error {
 		exceeded := time.After(timeout)
 		for {
 			select {
-			case evt := <-d.node.Events():
-				if frm, ok := evt.(*gomavlib.EventFrame); ok {
-					if ack, ok := frm.Message().(*common.MessageCommandAck); ok {
-						if ack.Command == cmd {
-							log.Printf("Received ACK for command %d: result=%d\n", ack.Command, ack.Result)
-							if ack.Result == common.MAV_RESULT_ACCEPTED {
-								return nil
-							}
-						}
-					}
+			case ack := <-d.ackChan:
+				if ack.Command == cmd {
+					return nil
 				}
 			case <-exceeded:
 				log.Printf("Exceeded timer waiting for ack ACCEPT %s\n", cmd.String())
@@ -64,6 +62,7 @@ func (d *Drone) sendCommand(cmd message.Message) error {
 				return nil
 			}
 		case message.Message:
+			log.Printf("Got non MessageCommandLong\n")
 			return nil
 		}
 	}
@@ -128,8 +127,8 @@ func (d *Drone) ArmAndTakeOffFromHome(ctx context.Context, altitude float32) err
 		TargetSystem:    1,
 		TargetComponent: 1,
 		Command:         common.MAV_CMD_NAV_TAKEOFF,
-		Param5:          d.homePoint.Latitude(),
-		Param6:          d.homePoint.Longitude(),
+		Param5:          d.currentPosition.Latitude(),
+		Param6:          d.currentPosition.Longitude(),
 		Param7:          altitude,
 	}
 
@@ -160,6 +159,8 @@ func (d *Drone) waitForHeight(ctx context.Context, desiredAlt float32) error {
 	altitudeSubscription, unsubscribe := d.currentPosition.subscribeAlt()
 	defer unsubscribe()
 
+	log.Printf("Waiting for altitude %v. Current altitude: %v\n", desiredAlt, d.currentPosition.alt)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -168,6 +169,7 @@ func (d *Drone) waitForHeight(ctx context.Context, desiredAlt float32) error {
 			if math.Abs(float64(alt-desiredAlt)) < .3 {
 				return nil
 			}
+			log.Printf("Current altitude: %v\n", alt)
 		default:
 			continue
 		}
@@ -200,16 +202,25 @@ func (d *Drone) Move(forward, right, down float32) error {
 func (d *Drone) handleFrame(evt *gomavlib.EventFrame) {
 	switch msg := evt.Frame.GetMessage().(type) {
 	case *common.MessageAttitude:
-		log.Printf("Attitude: Pitch: %v Roll: %v Yaw: %v\n", msg.Pitch, msg.Roll, msg.Yaw)
 		d.currentPitch = msg.Pitch
 		d.currentRoll = msg.Roll
 		d.currentYaw = msg.Yaw
-	case *common.MessagePositionTargetGlobalInt:
-		d.currentPosition.updateWayPoint(
-			float32(msg.LatInt)/SCALE_FACTOR,
-			float32(msg.LonInt)/SCALE_FACTOR,
-			msg.Alt,
-		)
+	case *common.MessageGlobalPositionInt:
+		if d.currentPosition == nil {
+			d.currentPosition = NewWayPoint(
+				float32(msg.Lat)/SCALE_FACTOR,
+				float32(msg.Lon)/SCALE_FACTOR,
+				float32(msg.RelativeAlt/1000),
+			)
+		} else {
+			d.currentPosition.updateWayPoint(
+				float32(msg.Lat)/SCALE_FACTOR,
+				float32(msg.Lon)/SCALE_FACTOR,
+				float32(msg.RelativeAlt/1000),
+			)
+		}
+	case *common.MessageCommandAck:
+		d.ackChan <- msg
 	default:
 		break
 	}

@@ -38,7 +38,7 @@ func main() {
 	drone.ChangeMode(internal.FLIGHT_MODE_GUIDED)
 
 	// Arm and TakeOff
-	drone.ArmAndTakeOffFromHome(context.Background(), 100)
+	drone.ArmAndTakeOffFromHome(ctx, 100)
 
 	// Land
 	drone.Land(ctx)
