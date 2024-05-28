@@ -20,12 +20,14 @@ type Drone struct {
 	homePoint       *WayPoint
 	currentPosition *WayPoint
 	ackChan         chan *common.MessageCommandAck
+	nedChan         chan *common.MessageLocalPositionNed
 }
 
 func NewDrone(node *gomavlib.Node, ctx context.Context) *Drone {
 	drone := &Drone{
 		node:    node,
 		ackChan: make(chan *common.MessageCommandAck),
+		nedChan: make(chan *common.MessageLocalPositionNed),
 	}
 
 	go drone.monitorEventLog(ctx)
@@ -155,6 +157,10 @@ func (d *Drone) Land(ctx context.Context) error {
 	return d.waitForHeight(ctx, 0)
 }
 
+func (d *Drone) CurrentPosition() *WayPoint {
+	return d.currentPosition
+}
+
 func (d *Drone) waitForHeight(ctx context.Context, desiredAlt float32) error {
 	altitudeSubscription, unsubscribe := d.currentPosition.subscribeAlt()
 	defer unsubscribe()
@@ -174,7 +180,19 @@ func (d *Drone) waitForHeight(ctx context.Context, desiredAlt float32) error {
 			continue
 		}
 	}
+}
 
+func (d *Drone) waitForPosition(ctx context.Context, x, y, z float32) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return errors.New("Deadline exceeded waiting for position")
+		case pos := <-d.nedChan:
+			if math.Abs(float64(pos.X-x)) < .3 && math.Abs(float64(pos.Y-y)) < .3 && math.Abs(float64(pos.Z-z)) < .3 {
+				return nil
+			}
+		}
+	}
 }
 
 func (d *Drone) StartMission(mission *Mission) error {
@@ -195,6 +213,8 @@ func (d *Drone) Move(forward, right, down float32) error {
 		Y:               forward*float32(math.Sin(float64(d.currentYaw))) + right*float32(math.Cos(float64(d.currentYaw))),
 		Z:               down,
 	}
+
+	d.waitForPosition(context.Background(), msg.X, msg.Y, msg.Z)
 
 	return d.sendCommand(msg)
 }

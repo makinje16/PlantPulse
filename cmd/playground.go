@@ -8,12 +8,6 @@ import (
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/common"
 )
 
-var (
-	currentYaw   float32 = 0.0
-	currentRoll  float32 = 0.0
-	currentPitch float32 = 0.0
-)
-
 func main() {
 	// create a node which communicates with a UDP endpoint in client mode
 	node, err := gomavlib.NewNode(gomavlib.NodeConf{
@@ -39,6 +33,13 @@ func main() {
 
 	// Arm and TakeOff
 	drone.ArmAndTakeOffFromHome(ctx, 100)
+
+	// Move 200ft forward
+	currentPos := drone.CurrentPosition()
+	drone.Move(200, 0, currentPos.Altitude())
+
+	// Move 200ft backward
+	drone.Move(-200, 0, currentPos.Altitude())
 
 	// Land
 	drone.Land(ctx)
