@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/bluenviron/gomavlib/v3"
@@ -13,21 +14,21 @@ import (
 )
 
 type Drone struct {
-	node            *gomavlib.Node
-	currentPitch    float32
-	currentYaw      float32
-	currentRoll     float32
-	homePoint       *WayPoint
-	currentPosition *WayPoint
-	ackChan         chan *common.MessageCommandAck
-	nedChan         chan *common.MessageLocalPositionNed
+	node               *gomavlib.Node
+	currentPitch       float32
+	currentYaw         float32
+	currentRoll        float32
+	homePoint          *WayPoint
+	currentPosition    *WayPoint
+	ackChan            chan *common.MessageCommandAck
+	currentPositionNED *common.MessageLocalPositionNed
+	nedPositionLock    sync.Mutex
 }
 
 func NewDrone(node *gomavlib.Node, ctx context.Context) *Drone {
 	drone := &Drone{
 		node:    node,
 		ackChan: make(chan *common.MessageCommandAck),
-		nedChan: make(chan *common.MessageLocalPositionNed),
 	}
 
 	go drone.monitorEventLog(ctx)
@@ -165,7 +166,7 @@ func (d *Drone) waitForHeight(ctx context.Context, desiredAlt float32) error {
 	altitudeSubscription, unsubscribe := d.currentPosition.subscribeAlt()
 	defer unsubscribe()
 
-	log.Printf("Waiting for altitude %v. Current altitude: %v\n", desiredAlt, d.currentPosition.alt)
+	log.Printf("Current altitude: %v Desired Altitude: %v\n", d.currentPosition.alt, desiredAlt)
 
 	for {
 		select {
@@ -175,7 +176,7 @@ func (d *Drone) waitForHeight(ctx context.Context, desiredAlt float32) error {
 			if math.Abs(float64(alt-desiredAlt)) < .3 {
 				return nil
 			}
-			log.Printf("Current altitude: %v\n", alt)
+			log.Printf("Current altitude: %v Desired Altitude: %v\n", d.currentPosition.alt, desiredAlt)
 		default:
 			continue
 		}
@@ -184,11 +185,15 @@ func (d *Drone) waitForHeight(ctx context.Context, desiredAlt float32) error {
 
 func (d *Drone) waitForPosition(ctx context.Context, x, y, z float32) error {
 	for {
+		currentPos := d.GetNEDPosition()
 		select {
 		case <-ctx.Done():
-			return errors.New("Deadline exceeded waiting for position")
-		case pos := <-d.nedChan:
-			if math.Abs(float64(pos.X-x)) < .3 && math.Abs(float64(pos.Y-y)) < .3 && math.Abs(float64(pos.Z-z)) < .3 {
+			return errors.New("deadline exceeded waiting for position")
+		default:
+			log.Printf("CurrentPos: %v,%v,%v DesiredPos: %v,%v,%v", currentPos.X, currentPos.Y, currentPos.Z, x, y, z)
+			if math.Abs(float64(currentPos.X-x)) < .3 &&
+				math.Abs(float64(currentPos.Y-y)) < .3 &&
+				math.Abs(float64(currentPos.Z-z)) < .3 {
 				return nil
 			}
 		}
@@ -211,12 +216,15 @@ func (d *Drone) Move(forward, right, down float32) error {
 		CoordinateFrame: common.MAV_FRAME_LOCAL_NED,
 		X:               forward*float32(math.Cos(float64(d.currentYaw))) - right*float32(math.Sin(float64(d.currentYaw))),
 		Y:               forward*float32(math.Sin(float64(d.currentYaw))) + right*float32(math.Cos(float64(d.currentYaw))),
-		Z:               down,
+		Z:               -1 * down,
 	}
 
-	d.waitForPosition(context.Background(), msg.X, msg.Y, msg.Z)
+	if err := d.sendCommand(msg); err != nil {
+		log.Printf("Error sending Move message: %v", err.Error())
+		return err
+	}
 
-	return d.sendCommand(msg)
+	return d.waitForPosition(context.Background(), msg.X, msg.Y, msg.Z)
 }
 
 func (d *Drone) handleFrame(evt *gomavlib.EventFrame) {
@@ -241,6 +249,11 @@ func (d *Drone) handleFrame(evt *gomavlib.EventFrame) {
 		}
 	case *common.MessageCommandAck:
 		d.ackChan <- msg
+	case *common.MessageLocalPositionNed:
+		d.nedPositionLock.Lock()
+		d.currentPositionNED = msg
+		d.nedPositionLock.Unlock()
+
 	default:
 		break
 	}
@@ -259,4 +272,11 @@ func (d *Drone) monitorEventLog(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (d *Drone) GetNEDPosition() *common.MessageLocalPositionNed {
+	d.nedPositionLock.Lock()
+	defer d.nedPositionLock.Unlock()
+
+	return d.currentPositionNED
 }
