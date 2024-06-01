@@ -1,13 +1,13 @@
 package internal
 
 type Mission struct {
-	waypoints []WayPoint
+	waypoints []*WayPoint
 }
 
-func NewMission(waypoints []WayPoint) *Mission {
+func NewMission(waypoints []*WayPoint) *Mission {
 	return &Mission{waypoints: waypoints}
 }
 
-func (m *Mission) Path() []WayPoint {
+func (m *Mission) Path() []*WayPoint {
 	return m.waypoints
 }

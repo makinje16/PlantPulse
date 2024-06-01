@@ -214,7 +214,13 @@ func (d *Drone) waitForPositionGPS(ctx context.Context, wp *WayPoint) error {
 }
 
 func (d *Drone) StartMission(mission *Mission) error {
-	return errors.ErrUnsupported
+	for _, wp := range mission.waypoints {
+		if err := d.MoveToWayPoint(context.Background(), wp); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (d *Drone) ReturnHome() error {
