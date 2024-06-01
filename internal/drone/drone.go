@@ -204,9 +204,10 @@ func (d *Drone) waitForPositionGPS(ctx context.Context, wp *WayPoint) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return errors.New("Deadline Exceeded")
+			return errors.New("deadline Exceeded")
 		default:
-			if d.currentPosition == wp {
+			log.Printf("CurrentPos: %v,%v,%v DesiredPos: %v,%v,%v", d.currentPosition.lat, d.currentPosition.long, d.currentPosition.alt, wp.lat, wp.long, wp.alt)
+			if d.currentPosition.lat == wp.lat && d.currentPosition.long == wp.long && d.currentPosition.alt == wp.alt {
 				return nil
 			}
 		}
@@ -247,13 +248,13 @@ func (d *Drone) Move(forward, right, down float32) error {
 }
 
 func (d *Drone) MoveToWayPoint(ctx context.Context, wp *WayPoint) error {
-	mvCMD := &common.MessageCommandLong{
+	mvCMD := &common.MessageSetPositionTargetGlobalInt{
 		TargetSystem:    1,
 		TargetComponent: 1,
-		Command:         common.MAV_CMD_NAV_WAYPOINT,
-		Param5:          wp.lat,
-		Param6:          wp.long,
-		Param7:          wp.alt,
+		CoordinateFrame: common.MAV_FRAME_GLOBAL_RELATIVE_ALT,
+		LatInt:          int32(wp.lat * SCALE_FACTOR),
+		LonInt:          int32(wp.long * SCALE_FACTOR),
+		Alt:             float32(wp.alt),
 	}
 
 	if err := d.sendCommand(mvCMD); err != nil {
