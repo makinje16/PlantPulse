@@ -200,6 +200,19 @@ func (d *Drone) waitForPosition(ctx context.Context, x, y, z float32) error {
 	}
 }
 
+func (d *Drone) waitForPositionGPS(ctx context.Context, wp *WayPoint) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return errors.New("Deadline Exceeded")
+		default:
+			if d.currentPosition == wp {
+				return nil
+			}
+		}
+	}
+}
+
 func (d *Drone) StartMission(mission *Mission) error {
 	return errors.ErrUnsupported
 }
@@ -225,6 +238,23 @@ func (d *Drone) Move(forward, right, down float32) error {
 	}
 
 	return d.waitForPosition(context.Background(), msg.X, msg.Y, msg.Z)
+}
+
+func (d *Drone) MoveToWayPoint(ctx context.Context, wp *WayPoint) error {
+	mvCMD := &common.MessageCommandLong{
+		TargetSystem:    1,
+		TargetComponent: 1,
+		Command:         common.MAV_CMD_NAV_WAYPOINT,
+		Param5:          wp.lat,
+		Param6:          wp.long,
+		Param7:          wp.alt,
+	}
+
+	if err := d.sendCommand(mvCMD); err != nil {
+		return err
+	}
+
+	return d.waitForPositionGPS(ctx, wp)
 }
 
 func (d *Drone) handleFrame(evt *gomavlib.EventFrame) {
@@ -253,7 +283,6 @@ func (d *Drone) handleFrame(evt *gomavlib.EventFrame) {
 		d.nedPositionLock.Lock()
 		d.currentPositionNED = msg
 		d.nedPositionLock.Unlock()
-
 	default:
 		break
 	}

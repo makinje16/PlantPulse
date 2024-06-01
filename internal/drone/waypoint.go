@@ -103,6 +103,10 @@ func (p *WayPoint) updateWayPoint(latitude, longitude, altitude float32) {
 	}
 }
 
+func (p *WayPoint) Equal(other *WayPoint) bool {
+	return p.alt == other.alt && p.lat == other.lat && p.long == other.long
+}
+
 func (p *WayPoint) Latitude() float32 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
