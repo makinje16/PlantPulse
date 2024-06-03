@@ -18,10 +18,10 @@ type Drone struct {
 	currentPitch       float32
 	currentYaw         float32
 	currentRoll        float32
-	homePoint          *WayPoint
 	currentPosition    *WayPoint
 	ackChan            chan *common.MessageCommandAck
 	currentPositionNED *common.MessageLocalPositionNed
+	homePosition       *common.MessageHomePosition
 	nedPositionLock    sync.Mutex
 }
 
@@ -225,7 +225,14 @@ func (d *Drone) StartMission(mission *Mission) error {
 }
 
 func (d *Drone) ReturnHome() error {
-	return errors.ErrUnsupported
+	returnCMD := &common.MessageCommandLong{
+		TargetSystem:    1,
+		TargetComponent: 1,
+		Command:         common.MAV_CMD_NAV_RETURN_TO_LAUNCH,
+	}
+
+	// TODO: actually wait for landing and unarm after sending command
+	return d.sendCommand(returnCMD)
 }
 
 func (d *Drone) Move(forward, right, down float32) error {
@@ -315,4 +322,13 @@ func (d *Drone) GetNEDPosition() *common.MessageLocalPositionNed {
 	defer d.nedPositionLock.Unlock()
 
 	return d.currentPositionNED
+}
+
+func (d *Drone) GetHomePosition() *WayPoint {
+	// TODO: decide on how to do altitude
+	return NewWayPoint(
+		float32(d.homePosition.Latitude)/SCALE_FACTOR,
+		float32(d.homePosition.Longitude)/SCALE_FACTOR,
+		10,
+	)
 }

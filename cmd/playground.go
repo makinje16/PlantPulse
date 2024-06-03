@@ -34,13 +34,13 @@ func main() {
 	// Arm and TakeOff
 	drone.ArmAndTakeOffFromHome(ctx, 100)
 
-	// Move 200ft forward
-	currentPos := drone.CurrentPosition()
-	drone.Move(200, 0, currentPos.Altitude())
+	// Move
+	drone.StartMission(internal.NewMission([]*internal.WayPoint{
+		internal.NewWayPoint(-35.36186414, 149.16501711, 100),
+		internal.NewWayPoint(-35.36166203, 149.16766073, 100),
+		internal.NewWayPoint(-35.36294209, 149.16755058, 100),
+	}))
 
-	// Move 200ft backward
-	drone.Move(-200, 0, currentPos.Altitude())
-
-	// Land
-	drone.Land(ctx)
+	// Return Home
+	drone.ReturnHome()
 }
