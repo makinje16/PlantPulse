@@ -32,7 +32,7 @@ func main() {
 	drone.ChangeMode(internal.FLIGHT_MODE_GUIDED)
 
 	// Arm and TakeOff
-	drone.ArmAndTakeOffFromHome(ctx, 100)
+	drone.ArmAndTakeOffFromHome(ctx, 25)
 
 	// Move
 	drone.StartMission(internal.NewMission([]*internal.WayPoint{

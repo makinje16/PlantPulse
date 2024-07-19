@@ -297,6 +297,10 @@ func (d *Drone) handleFrame(evt *gomavlib.EventFrame) {
 		d.nedPositionLock.Lock()
 		d.currentPositionNED = msg
 		d.nedPositionLock.Unlock()
+		//TODO: flesh out what we want to do with gimbal attitude
+	case *common.MessageGimbalDeviceAttitudeStatus:
+		log.Printf("%f, %f, %f", msg.Q[0], msg.Q[1], msg.Q[2])
+		//TODO: add in camera or figure out how to control camera
 	default:
 		break
 	}
