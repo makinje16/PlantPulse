@@ -1,4 +1,4 @@
-package internal
+package drone
 
 type Mission struct {
 	waypoints []*WayPoint

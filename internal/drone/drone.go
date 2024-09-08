@@ -1,8 +1,10 @@
-package internal
+package drone
 
 import (
+	ierrors "PlantPulse/internal/errors"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"math"
 	"sync"
@@ -271,13 +273,35 @@ func (d *Drone) MoveToWayPoint(ctx context.Context, wp *WayPoint) error {
 	return d.waitForPositionGPS(ctx, wp)
 }
 
+func (d *Drone) TakePhoto(ctx context.Context, interval float32, totalImages float32) error {
+	fmt.Println("A" + "B")
+	shutterCmd := common.MessageCommandLong{
+		TargetSystem:    1,
+		TargetComponent: 1,
+		Command:         common.MAV_CMD_IMAGE_START_CAPTURE,
+		Confirmation:    0,
+		Param2:          interval,
+		Param3:          totalImages,
+	}
+
+	return d.sendCommand(&shutterCmd)
+}
+
+func (d *Drone) PositionGimbal(ctx context.Context) error {
+	return ierrors.ErrUnimplemented
+}
+
 func (d *Drone) handleFrame(evt *gomavlib.EventFrame) {
+	log.Println("Got event frame")
 	switch msg := evt.Frame.GetMessage().(type) {
 	case *common.MessageAttitude:
+		fmt.Println("Message Attitude")
 		d.currentPitch = msg.Pitch
 		d.currentRoll = msg.Roll
 		d.currentYaw = msg.Yaw
+		log.Printf("Pitch: %v, Roll: %v, Yaw: %v\n", msg.Pitch, msg.Roll, msg.Yaw)
 	case *common.MessageGlobalPositionInt:
+		fmt.Println("Global Position Int")
 		if d.currentPosition == nil {
 			d.currentPosition = NewWayPoint(
 				float32(msg.Lat)/SCALE_FACTOR,
@@ -294,6 +318,7 @@ func (d *Drone) handleFrame(evt *gomavlib.EventFrame) {
 	case *common.MessageCommandAck:
 		d.ackChan <- msg
 	case *common.MessageLocalPositionNed:
+		fmt.Println("LocalPositionNed")
 		d.nedPositionLock.Lock()
 		d.currentPositionNED = msg
 		d.nedPositionLock.Unlock()
@@ -301,8 +326,12 @@ func (d *Drone) handleFrame(evt *gomavlib.EventFrame) {
 	case *common.MessageGimbalDeviceAttitudeStatus:
 		log.Printf("%f, %f, %f", msg.Q[0], msg.Q[1], msg.Q[2])
 		//TODO: add in camera or figure out how to control camera
+	case *common.MessageMountOrientation:
+		log.Printf("[GIMBAL] Roll: %v Pitch: %v Yaw: %v\n",
+			msg.Roll, msg.Pitch, msg.Yaw)
+	case *common.MessageHeartbeat:
+		fmt.Printf("MessageType: %s, SystemStatus: %s\n", msg.Type.String(), msg.SystemStatus.String())
 	default:
-		break
 	}
 }
 
@@ -310,13 +339,26 @@ func (d *Drone) monitorEventLog(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			fmt.Println("Context canceled")
+			return
 		case ch := <-d.node.Events():
 			switch evt := ch.(type) {
 			case *gomavlib.EventFrame:
 				d.handleFrame(evt)
+			case *gomavlib.EventChannelOpen:
+				fmt.Println("Channel Open")
+			case *gomavlib.EventChannelClose:
+				fmt.Println("Channel Close")
+			case *gomavlib.EventParseError:
+				fmt.Println("EventParseError")
+			case *gomavlib.EventStreamRequested:
+				fmt.Println("EventStreamRequested")
 			default:
+				fmt.Println("Unhandled Event Type")
 				continue
 			}
+		case <-time.After(5 * time.Second):
+			fmt.Println("No events received in the last 5 seconds")
 		}
 	}
 }
