@@ -1,7 +1,7 @@
 package drone
 
 import (
-	ierrors "PlantPulse/internal/errors"
+	"PlantPulse/internal/utils"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bluenviron/gomavlib/v3"
+	"github.com/bluenviron/gomavlib/v3/pkg/dialects/ardupilotmega"
 	"github.com/bluenviron/gomavlib/v3/pkg/dialects/common"
 	"github.com/bluenviron/gomavlib/v3/pkg/message"
 )
@@ -21,6 +22,10 @@ type Drone struct {
 	currentYaw         float32
 	currentRoll        float32
 	currentPosition    *WayPoint
+	gimbalPositionLock sync.Mutex
+	gimbalPosition     *common.MessageGimbalDeviceAttitudeStatus
+	heartBeat          *common.MessageHeartbeat
+	heartBeatLock      sync.Mutex
 	ackChan            chan *common.MessageCommandAck
 	currentPositionNED *common.MessageLocalPositionNed
 	homePosition       *common.MessageHomePosition
@@ -45,6 +50,7 @@ func (d *Drone) sendCommand(cmd message.Message) error {
 			select {
 			case ack := <-d.ackChan:
 				if ack.Command == cmd {
+					log.Printf("Command of type %s was ACKed", ack.Command.String())
 					return nil
 				}
 			case <-exceeded:
@@ -116,6 +122,7 @@ func (d *Drone) ArmAndTakeOff(lat, long float32) error {
 }
 
 func (d *Drone) ArmAndTakeOffFromHome(ctx context.Context, altitude float32) error {
+	d.ChangeMode(FLIGHT_MODE_GUIDED)
 	armCmd := &common.MessageCommandLong{
 		TargetSystem:    1, // target system ID (usually 1 for a single drone setup)
 		TargetComponent: 1, // target component ID
@@ -173,7 +180,7 @@ func (d *Drone) waitForHeight(ctx context.Context, desiredAlt float32) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return errors.New("Exceeded wait time to reach altitude")
+			return errors.New("exceeded wait time to reach altitude")
 		case alt := <-altitudeSubscription:
 			if math.Abs(float64(alt-desiredAlt)) < .3 {
 				return nil
@@ -185,6 +192,7 @@ func (d *Drone) waitForHeight(ctx context.Context, desiredAlt float32) error {
 	}
 }
 
+// NED Position
 func (d *Drone) waitForPosition(ctx context.Context, x, y, z float32) error {
 	for {
 		currentPos := d.GetNEDPosition()
@@ -233,8 +241,17 @@ func (d *Drone) ReturnHome() error {
 		Command:         common.MAV_CMD_NAV_RETURN_TO_LAUNCH,
 	}
 
-	// TODO: actually wait for landing and unarm after sending command
-	return d.sendCommand(returnCMD)
+	if err := d.sendCommand(returnCMD); err != nil {
+		return err
+	}
+
+	// TODO: Find a way to estimate ctx timeout time.
+	// probably estimate time to return home
+	if err := d.waitForPosition(context.Background(), 0, 0, 0); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (d *Drone) Move(forward, right, down float32) error {
@@ -274,7 +291,6 @@ func (d *Drone) MoveToWayPoint(ctx context.Context, wp *WayPoint) error {
 }
 
 func (d *Drone) TakePhoto(ctx context.Context, interval float32, totalImages float32) error {
-	fmt.Println("A" + "B")
 	shutterCmd := common.MessageCommandLong{
 		TargetSystem:    1,
 		TargetComponent: 1,
@@ -287,21 +303,13 @@ func (d *Drone) TakePhoto(ctx context.Context, interval float32, totalImages flo
 	return d.sendCommand(&shutterCmd)
 }
 
-func (d *Drone) PositionGimbal(ctx context.Context) error {
-	return ierrors.ErrUnimplemented
-}
-
 func (d *Drone) handleFrame(evt *gomavlib.EventFrame) {
-	log.Println("Got event frame")
 	switch msg := evt.Frame.GetMessage().(type) {
 	case *common.MessageAttitude:
-		fmt.Println("Message Attitude")
 		d.currentPitch = msg.Pitch
 		d.currentRoll = msg.Roll
 		d.currentYaw = msg.Yaw
-		log.Printf("Pitch: %v, Roll: %v, Yaw: %v\n", msg.Pitch, msg.Roll, msg.Yaw)
 	case *common.MessageGlobalPositionInt:
-		fmt.Println("Global Position Int")
 		if d.currentPosition == nil {
 			d.currentPosition = NewWayPoint(
 				float32(msg.Lat)/SCALE_FACTOR,
@@ -318,19 +326,23 @@ func (d *Drone) handleFrame(evt *gomavlib.EventFrame) {
 	case *common.MessageCommandAck:
 		d.ackChan <- msg
 	case *common.MessageLocalPositionNed:
-		fmt.Println("LocalPositionNed")
 		d.nedPositionLock.Lock()
 		d.currentPositionNED = msg
 		d.nedPositionLock.Unlock()
 		//TODO: flesh out what we want to do with gimbal attitude
 	case *common.MessageGimbalDeviceAttitudeStatus:
-		log.Printf("%f, %f, %f", msg.Q[0], msg.Q[1], msg.Q[2])
+		roll, pitch, yaw := utils.QuaternionToEulerDegrees(float64(msg.Q[0]), float64(msg.Q[1]), float64(msg.Q[2]), float64(msg.Q[3]))
+		log.Printf("[GIMBAL]: Roll: %f, Pitch: %f, Yaw: %f", roll, pitch, yaw)
 		//TODO: add in camera or figure out how to control camera
-	case *common.MessageMountOrientation:
-		log.Printf("[GIMBAL] Roll: %v Pitch: %v Yaw: %v\n",
-			msg.Roll, msg.Pitch, msg.Yaw)
+		d.gimbalPositionLock.Lock()
+		d.gimbalPosition = msg
+		d.gimbalPositionLock.Unlock()
 	case *common.MessageHeartbeat:
-		fmt.Printf("MessageType: %s, SystemStatus: %s\n", msg.Type.String(), msg.SystemStatus.String())
+		d.heartBeatLock.Lock()
+		d.heartBeat = msg
+		d.heartBeatLock.Unlock()
+	case *ardupilotmega.MessageMountStatus:
+		log.Printf("[MOUNT STATUS]: Pitch: %v, Roll: %v, Yaw: %v", msg.PointingA, msg.PointingB, msg.PointingC)
 	default:
 	}
 }
@@ -368,6 +380,41 @@ func (d *Drone) GetNEDPosition() *common.MessageLocalPositionNed {
 	defer d.nedPositionLock.Unlock()
 
 	return d.currentPositionNED
+}
+
+func (d *Drone) ChangeGimbalPosition(pitch, yaw float32) {
+
+	msg := &common.MessageCommandLong{
+		Command: common.MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW,
+		Param1:  pitch,
+		Param2:  yaw,
+		Param7:  0,
+	}
+
+	d.sendCommand(msg)
+}
+
+func (d *Drone) ChangeGimbalPositionServo(pitch, yaw float32) {
+	msg := &common.MessageCommandLong{
+		TargetSystem:    1,
+		TargetComponent: 1,
+		Command:         common.MAV_CMD_DO_MOUNT_CONTROL,
+		Param1:          -9000,
+		Param2:          0,
+		Param3:          4500,
+		Param4:          0,
+	}
+
+	d.sendCommand(msg)
+}
+
+func (d *Drone) requestMessage() {
+	//	msg := common.MessageCommandLong{
+	//		TargetSystem:    1,
+	//		TargetComponent: 1,
+	//		Command:         common.MAV_CMD_REQUEST_MESSAGE,
+	//		Param1:          float32(common.MAVLINK_MSG_),
+	//	}
 }
 
 func (d *Drone) GetHomePosition() *WayPoint {
