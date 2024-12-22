@@ -408,15 +408,6 @@ func (d *Drone) ChangeGimbalPositionServo(pitch, yaw float32) {
 	d.sendCommand(msg)
 }
 
-func (d *Drone) requestMessage() {
-	//	msg := common.MessageCommandLong{
-	//		TargetSystem:    1,
-	//		TargetComponent: 1,
-	//		Command:         common.MAV_CMD_REQUEST_MESSAGE,
-	//		Param1:          float32(common.MAVLINK_MSG_),
-	//	}
-}
-
 func (d *Drone) GetHomePosition() *WayPoint {
 	// TODO: decide on how to do altitude
 	return NewWayPoint(
